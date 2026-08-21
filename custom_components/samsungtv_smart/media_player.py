@@ -526,17 +526,23 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
         return True
 
     async def _async_wait_for_power_on(self, max_wait: timedelta = POWER_ON_MAX_WAIT):
-        """Wait for TV to power on and SmartThings to confirm it."""
+        """Wait for TV to power on and SmartThings to confirm it.
+        
+        NOTE: This does NOT make additional API calls! Instead, it waits for the normal
+        polling cycle (async_update) to fetch the latest status from SmartThings.
+        The polling respects the 5-second API rate limit automatically.
+        This way we avoid exceeding SmartThings API limits while still getting confirmation.
+        """
         if not self._st:
             # No SmartThings, just wait a bit and assume it's on
             await asyncio.sleep(3)
             return True
         
         start_time = dt_util.utcnow()
-        check_interval = 0.5  # Check every 500ms
+        check_interval = 0.5  # Check the already-polled state every 500ms
         
         _LOGGER.debug(
-            "%s - Waiting for TV to power on (SmartThings confirmation, max %s seconds)",
+            "%s - Waiting for TV to power on (SmartThings polling confirmation, max %s seconds)",
             self.entity_id,
             max_wait.total_seconds(),
         )
@@ -552,16 +558,8 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
                 )
                 return False
             
-            # Update SmartThings status
-            try:
-                async with async_timeout.timeout(5):
-                    await self._st.async_device_update(self._use_channel_info)
-            except Exception as ex:
-                _LOGGER.debug("%s - ST update failed during power-on wait: %s", self.entity_id, ex)
-                await asyncio.sleep(check_interval)
-                continue
-            
-            # Check if TV is now ON according to SmartThings
+            # Just check the already-polled SmartThings state (no API call)
+            # The polling cycle (async_update) handles API calls with proper rate-limiting
             if self._st.state == STStatus.STATE_ON:
                 _LOGGER.info(
                     "%s - TV powered on successfully (confirmed by SmartThings after %.1f seconds)",
@@ -570,6 +568,8 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
                 )
                 return True
             
+            # Wait before checking again - but don't make our own API calls
+            # Let the normal polling cycle (SCAN_INTERVAL = 1 second) get the latest state
             await asyncio.sleep(check_interval)
 
     async def _update_volume_info(self):
