@@ -450,40 +450,64 @@ class SmartThingsTV:
 
         self._prev_state = self._state
 
+        # Check device health (just for diagnostics, not for power state)
         try:
             is_online = await self.async_device_health()
         except (
             AsyncTimeoutError,
             ClientConnectionError,
             ClientResponseError,
-        ):
-            self._state = STStatus.STATE_UNKNOWN
-            return
+        ) as ex:
+            _LOGGER.debug("SmartThings health check failed: %s", ex)
+            is_online = True  # Assume online and try to read status anyway
 
-        if is_online:
-            self._state = STStatus.STATE_ON
-        else:
-            self._state = STStatus.STATE_OFF
-            return
+        # Get the actual device status from API
+        try:
+            async with self._session.get(
+                f"{API_DEVICES}/{self._device_id}/states",
+                headers=_headers(self._get_api_key()),
+                raise_for_status=True,
+            ) as resp:
+                data = await resp.json()
 
-        await self._device_refresh()
-        if self._state == STStatus.STATE_OFF:
-            return
+            _LOGGER.debug("SmartThings device status: %s", data)
 
-        async with self._session.get(
-            api_device_status,
-            headers=_headers(self._get_api_key()),
-            raise_for_status=True,
-        ) as resp:
-            data = await resp.json()
+            dev_data = data.get("main", {})
+            
+            # Get actual power state from switch component (the real power status)
+            device_switch = dev_data.get("switch", {}).get("switch", {}).get("value", "")
+            _LOGGER.debug("SmartThings switch raw value: %s (type: %s)", device_switch, type(device_switch))
+            
+            # Handle both string and boolean values
+            if isinstance(device_switch, bool):
+                self._state = STStatus.STATE_ON if device_switch else STStatus.STATE_OFF
+                _LOGGER.debug("SmartThings switch is boolean, state set to %s", self._state)
+            elif isinstance(device_switch, str):
+                device_switch_lower = device_switch.lower().strip()
+                if device_switch_lower == "on":
+                    self._state = STStatus.STATE_ON
+                    _LOGGER.debug("SmartThings state set to ON")
+                elif device_switch_lower == "off":
+                    self._state = STStatus.STATE_OFF
+                    _LOGGER.debug("SmartThings state set to OFF")
+                else:
+                    # Fallback if switch value is unexpected
+                    _LOGGER.warning("SmartThings switch value unexpected: %s, defaulting to OFF", device_switch)
+                    self._state = STStatus.STATE_OFF
+            else:
+                # Unknown type - default to OFF
+                _LOGGER.warning("SmartThings switch value has unknown type: %s, defaulting to OFF", type(device_switch))
+                self._state = STStatus.STATE_OFF
 
-        _LOGGER.debug(data)
+            # Skip rest if TV is OFF
+            if self._state == STStatus.STATE_OFF:
+                return
 
-        dev_data = data.get("main", {})
-        # device_state = data['main']['switch']['value']
+            # TV is ON - fetch additional info
+            await self._device_refresh()
 
-        # Volume
-        device_volume = dev_data.get("volume", {}).get("value", 0)
+            # Volume
+            device_volume = dev_data.get("volume", {}).get("value", 0)
         if device_volume and device_volume.isdigit():
             self._volume = int(device_volume) / 100
         else:
