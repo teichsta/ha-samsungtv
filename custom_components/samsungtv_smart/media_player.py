@@ -614,6 +614,19 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
     async def _check_status(self):
         """Check TV status with WS and others method to check power status."""
 
+        # If SmartThings is configured and reports OFF, TV is definitely OFF
+        # SmartThings is the source of truth for power state
+        if self._st and self._use_st_status:
+            if self._st.state == STStatus.STATE_OFF:
+                _LOGGER.debug("SmartThings reports TV is OFF, status check returns False")
+                return False
+            elif self._st.state == STStatus.STATE_ON:
+                _LOGGER.debug("SmartThings reports TV is ON")
+                # SmartThings says ON, trust it
+                return True
+            # STATE_UNKNOWN - fall through to other checks
+
+        # No SmartThings or unknown state - check other methods
         if self._get_device_spec("PowerState") is not None:
             _LOGGER.debug("Checking if TV %s is on using device info", self._host)
             # Ensure we get an updated value
@@ -621,14 +634,6 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
             return info is not None and info["device"]["PowerState"] == "on"
 
         result = self._ws.is_connected
-        if result and self._st:
-            if (
-                self._st.state == STStatus.STATE_OFF
-                and self._st.prev_state != STStatus.STATE_OFF
-                and self._state == MediaPlayerState.ON
-                and self._use_st_status
-            ):
-                result = False
 
         if result:
             result = self._get_external_entity_status()
