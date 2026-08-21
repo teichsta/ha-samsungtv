@@ -508,53 +508,63 @@ class SmartThingsTV:
 
             # Volume
             device_volume = dev_data.get("volume", {}).get("value", 0)
-        if device_volume and device_volume.isdigit():
-            self._volume = int(device_volume) / 100
-        else:
-            self._volume = 0
+            if device_volume and device_volume.isdigit():
+                self._volume = int(device_volume) / 100
+            else:
+                self._volume = 0
 
-        # Muted state
-        device_muted = dev_data.get("mute", {}).get("value", "")
-        self._muted = device_muted == "mute"
+            # Muted state
+            device_muted = dev_data.get("mute", {}).get("value", "")
+            self._muted = device_muted == "mute"
 
-        # Sound Mode
-        self._sound_mode = dev_data.get("soundMode", {}).get("value")
-        self._sound_mode_list = self._load_json_list(dev_data, "supportedSoundModes")
+            # Sound Mode
+            self._sound_mode = dev_data.get("soundMode", {}).get("value")
+            self._sound_mode_list = self._load_json_list(dev_data, "supportedSoundModes")
 
-        # Picture Mode
-        self._picture_mode = dev_data.get("pictureMode", {}).get("value")
-        self._picture_mode_list = self._load_json_list(
-            dev_data, "supportedPictureModes"
-        )
+            # Picture Mode
+            self._picture_mode = dev_data.get("pictureMode", {}).get("value")
+            self._picture_mode_list = self._load_json_list(
+                dev_data, "supportedPictureModes"
+            )
 
-        # Sources and channel
-        self._source_list_map = self._load_json_list(
-            dev_data, "supportedInputSourcesMap"
-        )
-        # self._source_list = self._load_json_list(dev_data, "supportedInputSources")
-        self._source_list = self._get_source_list_from_map()
+            # Sources and channel
+            self._source_list_map = self._load_json_list(
+                dev_data, "supportedInputSourcesMap"
+            )
+            # self._source_list = self._load_json_list(dev_data, "supportedInputSources")
+            self._source_list = self._get_source_list_from_map()
 
-        if self._is_forced_val and self._forced_count <= 0:
-            self._forced_count += 1
-            return
-        self._is_forced_val = False
-        self._forced_count = 0
+            if self._is_forced_val and self._forced_count <= 0:
+                self._forced_count += 1
+                return
+            self._is_forced_val = False
+            self._forced_count = 0
 
-        device_source = dev_data.get("inputSource", {}).get("value", "")
-        device_tv_chan = dev_data.get("tvChannel", {}).get("value", "")
-        device_tv_chan_name = dev_data.get("tvChannelName", {}).get("value", "")
+            device_source = dev_data.get("inputSource", {}).get("value", "")
+            device_tv_chan = dev_data.get("tvChannel", {}).get("value", "")
+            device_tv_chan_name = dev_data.get("tvChannelName", {}).get("value", "")
 
-        if device_source:
-            if device_source.upper() == DIGITAL_TV.upper():
-                device_source = DIGITAL_TV
-        self._source = device_source
-        # if the status is not refreshed this info may become not reliable
-        if self._use_channel_info:
-            self._channel = device_tv_chan
-            self._channel_name = device_tv_chan_name
-        else:
-            self._channel = ""
-            self._channel_name = ""
+            if device_source:
+                if device_source.upper() == DIGITAL_TV.upper():
+                    device_source = DIGITAL_TV
+            self._source = device_source
+            # if the status is not refreshed this info may become not reliable
+            if self._use_channel_info:
+                self._channel = device_tv_chan
+                self._channel_name = device_tv_chan_name
+            else:
+                self._channel = ""
+                self._channel_name = ""
+        except (
+            AsyncTimeoutError,
+            ClientConnectionError,
+            ClientResponseError,
+        ) as ex:
+            _LOGGER.error("SmartThings device status update failed: %s", ex)
+            self._state = STStatus.STATE_UNKNOWN
+        except Exception as ex:
+            _LOGGER.error("Unexpected error during SmartThings device status update: %s", ex)
+            self._state = STStatus.STATE_UNKNOWN
 
     async def async_turn_off(self):
         """Turn off TV via SmartThings"""
