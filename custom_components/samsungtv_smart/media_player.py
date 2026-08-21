@@ -535,36 +535,55 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
         """
         if not self._st:
             # No SmartThings, just wait a bit and assume it's on
+            _LOGGER.debug("%s - No SmartThings configured, skipping power-on confirmation wait", self.entity_id)
             await asyncio.sleep(3)
             return True
         
         start_time = dt_util.utcnow()
         check_interval = 0.5  # Check the already-polled state every 500ms
+        last_logged_state = self._st.state
+        check_count = 0
         
         _LOGGER.debug(
-            "%s - Waiting for TV to power on (SmartThings polling confirmation, max %s seconds)",
+            "%s - Starting power-on wait: initial ST state=%s, max wait=%s seconds",
             self.entity_id,
+            self._st.state,
             max_wait.total_seconds(),
         )
         
         while True:
             elapsed = dt_util.utcnow() - start_time
+            check_count += 1
             
             if elapsed > max_wait:
                 _LOGGER.warning(
-                    "%s - Power on timeout after %s seconds waiting for SmartThings confirmation",
+                    "%s - Power on timeout after %.1f seconds (checked %d times). Final ST state=%s",
                     self.entity_id,
                     elapsed.total_seconds(),
+                    check_count,
+                    self._st.state,
                 )
                 return False
             
             # Just check the already-polled SmartThings state (no API call)
             # The polling cycle (async_update) handles API calls with proper rate-limiting
-            if self._st.state == STStatus.STATE_ON:
-                _LOGGER.info(
-                    "%s - TV powered on successfully (confirmed by SmartThings after %.1f seconds)",
+            current_state = self._st.state
+            if current_state != last_logged_state:
+                _LOGGER.debug(
+                    "%s - ST state changed after %.1f seconds: %s → %s",
                     self.entity_id,
                     elapsed.total_seconds(),
+                    last_logged_state,
+                    current_state,
+                )
+                last_logged_state = current_state
+            
+            if current_state == STStatus.STATE_ON:
+                _LOGGER.info(
+                    "%s - TV powered on successfully (confirmed by SmartThings after %.1f seconds, %d checks)",
+                    self.entity_id,
+                    elapsed.total_seconds(),
+                    check_count,
                 )
                 return True
             
@@ -1307,6 +1326,16 @@ class SamsungTVDevice(SamsungTVEntity, MediaPlayerEntity):
             self._state = MediaPlayerState.OFF
             self._end_of_power_off = None
             self._ws.set_power_on_request(set_art_mode)
+            
+            # Force a fresh SmartThings update immediately to get baseline state
+            # This bypasses the throttle to ensure we have current data before waiting
+            if self._st:
+                try:
+                    _LOGGER.debug("%s - Forcing fresh SmartThings update before power-on wait", self.entity_id)
+                    async with async_timeout.timeout(5):
+                        await self._st.async_device_update(self._use_channel_info)
+                except Exception as ex:
+                    _LOGGER.debug("%s - Fresh ST update failed: %s", self.entity_id, ex)
             
             # Wait for SmartThings to confirm the TV is on
             # This prevents the UI from showing "on" too early for deep-standby devices
