@@ -484,7 +484,11 @@ class SmartThingsTV:
                 _LOGGER.debug("SmartThings switch is boolean, state set to %s", self._state)
             elif isinstance(device_switch, str):
                 device_switch_lower = device_switch.lower().strip()
-                if device_switch_lower == "on":
+                if not device_switch_lower:
+                    # Empty string - default to OFF
+                    _LOGGER.debug("SmartThings switch value is empty, defaulting to OFF")
+                    self._state = STStatus.STATE_OFF
+                elif device_switch_lower == "on":
                     self._state = STStatus.STATE_ON
                     _LOGGER.debug("SmartThings state set to ON")
                 elif device_switch_lower == "off":
